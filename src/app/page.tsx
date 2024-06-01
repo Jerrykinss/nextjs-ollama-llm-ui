@@ -1,16 +1,6 @@
 "use client";
 
 import { ChatLayout } from "@/components/chat/chat-layout";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogContent,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import UsernameForm from "@/components/username-form";
 import { getSelectedModel } from "@/lib/model-helper";
 import { ChatOllama } from "@langchain/community/chat_models/ollama";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
@@ -23,7 +13,7 @@ import { v4 as uuidv4 } from "uuid";
 
 export default function Home() {
   const {
-    messages,
+    messages = [],
     input,
     handleInputChange,
     handleSubmit,
@@ -44,14 +34,22 @@ export default function Home() {
     },
   });
   const [chatId, setChatId] = React.useState<string>("");
-  const [selectedModel, setSelectedModel] = React.useState<string>(
-    getSelectedModel()
-  );
+  const [selectedModel, setSelectedModel] =
+    React.useState<string>(getSelectedModel());
   const [open, setOpen] = React.useState(false);
   const [ollama, setOllama] = useState<ChatOllama>();
   const env = process.env.NODE_ENV;
   const [loadingSubmit, setLoadingSubmit] = React.useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    if (messages.length < 1) {
+      // Generate a random id for the chat
+      console.log("Generating chat id");
+      const id = uuidv4();
+      setChatId(id);
+    }
+  }, [messages]);
 
   React.useEffect(() => {
     if (!isLoading && !error && chatId && messages.length > 0) {
@@ -60,7 +58,7 @@ export default function Home() {
       // Trigger the storage event to update the sidebar component
       window.dispatchEvent(new Event("storage"));
     }
-  }, [messages, chatId, isLoading, error]);
+  }, [chatId, isLoading, error]);
 
   useEffect(() => {
     if (env === "production") {
@@ -84,7 +82,7 @@ export default function Home() {
 
   // Function to handle chatting with Ollama in production (client side)
   const handleSubmitProduction = async (
-    e: React.FormEvent<HTMLFormElement>
+    e: React.FormEvent<HTMLFormElement>,
   ) => {
     e.preventDefault();
 
@@ -101,8 +99,8 @@ export default function Home() {
             (messages as Message[]).map((m) =>
               m.role == "user"
                 ? new HumanMessage(m.content)
-                : new AIMessage(m.content)
-            )
+                : new AIMessage(m.content),
+            ),
           );
 
         const decoder = new TextDecoder();
@@ -111,12 +109,18 @@ export default function Home() {
         for await (const chunk of stream) {
           const decodedChunk = decoder.decode(chunk);
           responseMessage += decodedChunk;
+          setLoadingSubmit(false);
+          setMessages([
+            ...messages,
+            { role: "assistant", content: responseMessage, id: chatId },
+          ]);
         }
-        setMessages([
-          ...messages,
-          { role: "assistant", content: responseMessage, id: chatId },
-        ]);
-        setLoadingSubmit(false);
+        addMessage({ role: "assistant", content: responseMessage, id: chatId });
+        setMessages([...messages]);
+
+        localStorage.setItem(`chat_${chatId}`, JSON.stringify(messages));
+        // Trigger the storage event to update the sidebar component
+        window.dispatchEvent(new Event("storage"));
       } catch (error) {
         toast.error("An error occurred. Please try again.");
         setLoadingSubmit(false);
@@ -127,12 +131,6 @@ export default function Home() {
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoadingSubmit(true);
-
-    if (messages.length === 0) {
-      // Generate a random id for the chat
-      const id = uuidv4();
-      setChatId(id);
-    }
 
     setMessages([...messages]);
 
@@ -153,36 +151,46 @@ export default function Home() {
     }
   };
 
+  const getLocalstorageChats = (): String[] => {
+    const chats = Object.keys(localStorage).filter((key) =>
+      key.startsWith("chat_"),
+    );
+    return chats;
+  };
+
+  useEffect(() => {
+    if (getLocalstorageChats().length < 2 && messages.length < 2) {
+      console.log("print messages");
+      addMessage({
+        role: "user",
+        content: "userMessage\n\n\n\n\n\n\n\n\\n\n\n\n\n\n\n\n\n",
+        id: chatId,
+      });
+      addMessage({
+        role: "assistant",
+        content: "responseMessage\n\n\n\n\n\n\n\n\\n\n\n\n\n\n\n\n\n",
+        id: chatId,
+      });
+    }
+  }, []);
+
   return (
     <main className="flex h-[calc(100dvh)] flex-col items-center ">
-      <Dialog open={open} onOpenChange={setOpen}>
-        <ChatLayout
-          chatId=""
-          setSelectedModel={setSelectedModel}
-          messages={messages}
-          input={input}
-          handleInputChange={handleInputChange}
-          handleSubmit={onSubmit}
-          isLoading={isLoading}
-          loadingSubmit={loadingSubmit}
-          error={error}
-          stop={stop}
-          navCollapsedSize={10}
-          defaultLayout={[30, 160]}
-          formRef={formRef}
-          setMessages={setMessages}
-        />
-        <DialogContent className="flex flex-col space-y-4">
-          <DialogHeader className="space-y-2">
-            <DialogTitle>Welcome to Ollama!</DialogTitle>
-            <DialogDescription>
-              Enter your name to get started. This is just to personalize your
-              experience.
-            </DialogDescription>
-            <UsernameForm setOpen={setOpen} />
-          </DialogHeader>
-        </DialogContent>
-      </Dialog>
+      <ChatLayout
+        chatId={chatId}
+        setSelectedModel={setSelectedModel}
+        messages={messages}
+        input={input}
+        handleInputChange={handleInputChange}
+        handleSubmit={handleSubmit}
+        isLoading={isLoading}
+        loadingSubmit={loadingSubmit}
+        error={error}
+        stop={stop}
+        formRef={formRef}
+        setInput={setInput}
+        setMessages={setMessages}
+      />
     </main>
   );
 }

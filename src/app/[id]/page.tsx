@@ -7,7 +7,7 @@ import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import { BytesOutputParser } from "@langchain/core/output_parsers";
 import { ChatRequestOptions } from "ai";
 import { Message, useChat } from "ai/react";
-import React, { useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { v4 as uuidv4 } from "uuid";
 
@@ -34,12 +34,12 @@ export default function Page({ params }: { params: { id: string } }) {
     },
   });
   const [chatId, setChatId] = React.useState<string>("");
-  const [selectedModel, setSelectedModel] = React.useState<string>(
-    getSelectedModel()
-  );
+  const [selectedModel, setSelectedModel] =
+    React.useState<string>(getSelectedModel());
   const [ollama, setOllama] = React.useState<ChatOllama>();
   const env = process.env.NODE_ENV;
   const [loadingSubmit, setLoadingSubmit] = React.useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (env === "production") {
@@ -58,7 +58,7 @@ export default function Page({ params }: { params: { id: string } }) {
         setMessages(JSON.parse(item));
       }
     }
-  }, [setMessages]);
+  }, []);
 
   const addMessage = (Message: any) => {
     messages.push(Message);
@@ -68,7 +68,7 @@ export default function Page({ params }: { params: { id: string } }) {
 
   // Function to handle chatting with Ollama in production (client side)
   const handleSubmitProduction = async (
-    e: React.FormEvent<HTMLFormElement>
+    e: React.FormEvent<HTMLFormElement>,
   ) => {
     e.preventDefault();
 
@@ -85,8 +85,8 @@ export default function Page({ params }: { params: { id: string } }) {
             (messages as Message[]).map((m) =>
               m.role == "user"
                 ? new HumanMessage(m.content)
-                : new AIMessage(m.content)
-            )
+                : new AIMessage(m.content),
+            ),
           );
 
         const decoder = new TextDecoder();
@@ -95,12 +95,18 @@ export default function Page({ params }: { params: { id: string } }) {
         for await (const chunk of stream) {
           const decodedChunk = decoder.decode(chunk);
           responseMessage += decodedChunk;
+          setLoadingSubmit(false);
+          setMessages([
+            ...messages,
+            { role: "assistant", content: responseMessage, id: chatId },
+          ]);
         }
-        setMessages([
-          ...messages,
-          { role: "assistant", content: responseMessage, id: chatId },
-        ]);
-        setLoadingSubmit(false);
+        addMessage({ role: "assistant", content: responseMessage, id: chatId });
+        setMessages([...messages]);
+
+        localStorage.setItem(`chat_${params.id}`, JSON.stringify(messages));
+        // Trigger the storage event to update the sidebar component
+        window.dispatchEvent(new Event("storage"));
       } catch (error) {
         toast.error("An error occurred. Please try again.");
         setLoadingSubmit(false);
@@ -141,21 +147,45 @@ export default function Page({ params }: { params: { id: string } }) {
     }
   }, [messages, chatId, isLoading, error]);
 
+  const getLocalstorageChats = (): String[] => {
+    const chats = Object.keys(localStorage).filter((key) =>
+      key.startsWith("chat_"),
+    );
+    return chats;
+  };
+
+  useEffect(() => {
+    if (getLocalstorageChats().length < 2 && messages.length < 2) {
+      console.log("print messages");
+      addMessage({
+        role: "user",
+        content: "userMessage\n\n\n\n\nn\n\n\n\\n\n\n\n\n\n\n\n\n",
+        id: chatId,
+      });
+      addMessage({
+        role: "assistant",
+        content: "responseMessage\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+        id: chatId,
+      });
+    }
+  }, []);
+
   return (
     <main className="flex h-[calc(100dvh)] flex-col items-center">
       <ChatLayout
-        chatId={params.id}
+        chatId={chatId}
         setSelectedModel={setSelectedModel}
         messages={messages}
         input={input}
         handleInputChange={handleInputChange}
-        handleSubmit={onSubmit}
+        handleSubmit={handleSubmit}
         isLoading={isLoading}
         loadingSubmit={loadingSubmit}
         error={error}
         stop={stop}
-        navCollapsedSize={10}
-        defaultLayout={[30, 160]}
+        formRef={formRef}
+        setInput={setInput}
+        setMessages={setMessages}
       />
     </main>
   );
